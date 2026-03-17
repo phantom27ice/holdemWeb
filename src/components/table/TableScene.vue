@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import TableShell from './TableShell.vue'
 import PotBar from './PotBar.vue'
@@ -8,9 +8,12 @@ import HoleCards from './HoleCards.vue'
 import SeatView from './SeatView.vue'
 import ActionPanel from './ActionPanel.vue'
 import { useTableStore } from '../../stores/tableStore'
+import type { EngineError, GameEvent } from '../../game/types'
+
+type ActionAppliedType = 'CHECK' | 'CALL' | 'FOLD' | 'BET' | 'RAISE' | 'ALL_IN'
 
 const tableStore = useTableStore()
-const { tableView } = storeToRefs(tableStore)
+const { tableView, events, lastEngineError } = storeToRefs(tableStore)
 const { heroFold, heroCallOrCheck, heroRaise } = tableStore
 
 onMounted(() => {
@@ -28,6 +31,48 @@ const seatAnchors: Record<number, { x: number; y: number }> = {
 
 const heroSeat = computed(() => tableView.value.seats.find((seat) => seat.isHero))
 const opponents = computed(() => tableView.value.seats.filter((seat) => !seat.isHero))
+const seatActionHints = ref<Record<number, string>>({})
+const actionToast = ref<string | null>(null)
+const boardAnimationKey = ref(0)
+const potAnimationKey = ref(0)
+
+const seatHintTimers = new Map<number, number>()
+let actionToastTimer: number | null = null
+
+watch(
+  () => events.value.length,
+  (current, previous) => {
+    if (current <= previous || current === 0) {
+      return
+    }
+
+    const latest = events.value[current - 1]
+    if (latest) {
+      applyEventFeedback(latest)
+    }
+  },
+)
+
+watch(
+  () => lastEngineError.value,
+  (error) => {
+    if (!error) {
+      return
+    }
+
+    showToast(formatEngineError(error))
+  },
+)
+
+onBeforeUnmount(() => {
+  for (const timer of seatHintTimers.values()) {
+    window.clearTimeout(timer)
+  }
+
+  if (actionToastTimer !== null) {
+    window.clearTimeout(actionToastTimer)
+  }
+})
 
 function getSeatStyle(seat: number): Record<string, string> {
   const anchor = seatAnchors[seat] ?? { x: 0, y: 0 }
@@ -38,6 +83,110 @@ function getSeatStyle(seat: number): Record<string, string> {
     transform: 'translate(-50%, -50%)',
   }
 }
+
+function applyEventFeedback(event: GameEvent): void {
+  if (event.type === 'ACTION_APPLIED') {
+    const label = formatActionLabel(event.action as ActionAppliedType, event.amount)
+    setSeatActionHint(event.seat, label)
+    showToast(`${getSeatName(event.seat)} ${label}`)
+
+    if (event.amount > 0 || event.action === 'BET' || event.action === 'RAISE') {
+      potAnimationKey.value += 1
+    }
+    return
+  }
+
+  if (event.type === 'BOARD_DEALT') {
+    boardAnimationKey.value += 1
+    showToast(
+      event.street === 'FLOP'
+        ? '翻牌圈发牌'
+        : event.street === 'TURN'
+          ? '转牌发牌'
+          : '河牌发牌',
+    )
+    return
+  }
+
+  if (event.type === 'POT_AWARDED') {
+    potAnimationKey.value += 1
+    showToast(`派奖 ${event.amount}`)
+  }
+}
+
+function setSeatActionHint(seat: number, text: string): void {
+  seatActionHints.value = {
+    ...seatActionHints.value,
+    [seat]: text,
+  }
+
+  const existing = seatHintTimers.get(seat)
+  if (existing !== undefined) {
+    window.clearTimeout(existing)
+  }
+
+  const timer = window.setTimeout(() => {
+    const next = { ...seatActionHints.value }
+    delete next[seat]
+    seatActionHints.value = next
+    seatHintTimers.delete(seat)
+  }, 1300)
+
+  seatHintTimers.set(seat, timer)
+}
+
+function showToast(message: string): void {
+  actionToast.value = message
+
+  if (actionToastTimer !== null) {
+    window.clearTimeout(actionToastTimer)
+  }
+
+  actionToastTimer = window.setTimeout(() => {
+    actionToast.value = null
+    actionToastTimer = null
+  }, 1500)
+}
+
+function getSeatName(seat: number): string {
+  return tableView.value.seats.find((item) => item.seat === seat)?.name ?? `Seat ${seat}`
+}
+
+function formatActionLabel(action: ActionAppliedType, amount: number): string {
+  switch (action) {
+    case 'FOLD':
+      return '弃牌'
+    case 'CHECK':
+      return '过牌'
+    case 'CALL':
+      return amount > 0 ? `跟注 ${amount}` : '跟注'
+    case 'BET':
+      return amount > 0 ? `下注 ${amount}` : '下注'
+    case 'RAISE':
+      return amount > 0 ? `加注 ${amount}` : '加注'
+    case 'ALL_IN':
+      return amount > 0 ? `全下 ${amount}` : '全下'
+    default:
+      return '行动'
+  }
+}
+
+function formatEngineError(error: EngineError): string {
+  switch (error.code) {
+    case 'NOT_ACTOR_TURN':
+      return '未轮到当前玩家行动'
+    case 'INVALID_AMOUNT':
+      return '下注金额非法'
+    case 'ILLEGAL_ACTION':
+      return '当前动作不合法'
+    case 'INVALID_PHASE':
+      return '当前阶段不可执行该动作'
+    case 'INVARIANT_VIOLATION':
+      return `状态校验失败: ${error.message}`
+    default:
+      return error.message
+  }
+}
 </script>
 
 <template>
@@ -45,22 +194,24 @@ function getSeatStyle(seat: number): Record<string, string> {
     <div class="table-stage">
       <TableShell>
         <div class="pot-bar-wrap">
-          <PotBar :amount="tableView.pot" />
+          <PotBar :key="potAnimationKey" :amount="tableView.pot" />
         </div>
 
         <div class="board-wrap">
-          <BoardCards :board="tableView.board" />
+          <BoardCards :key="boardAnimationKey" :board="tableView.board" />
         </div>
 
         <div v-for="seat in opponents" :key="seat.seat" class="seat-layer" :style="getSeatStyle(seat.seat)">
-          <SeatView :seat="seat" />
+          <SeatView :seat="seat" :action-label="seatActionHints[seat.seat]" />
         </div>
 
         <div v-if="heroSeat" class="hero-layer" :style="getSeatStyle(heroSeat.seat)">
-          <SeatView :seat="heroSeat" />
+          <SeatView :seat="heroSeat" :action-label="seatActionHints[heroSeat.seat]" />
           <HoleCards :cards="heroSeat.cards" />
         </div>
       </TableShell>
+
+      <p v-if="lastEngineError" class="error-tip">{{ formatEngineError(lastEngineError) }}</p>
 
       <div class="actions-wrap">
         <ActionPanel
@@ -75,6 +226,10 @@ function getSeatStyle(seat: number): Record<string, string> {
           @raise="heroRaise"
         />
       </div>
+
+      <transition name="toast-fade">
+        <p v-if="actionToast" class="action-toast">{{ actionToast }}</p>
+      </transition>
     </div>
   </section>
 </template>
@@ -93,6 +248,7 @@ function getSeatStyle(seat: number): Record<string, string> {
 }
 
 .table-stage {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -128,9 +284,51 @@ function getSeatStyle(seat: number): Record<string, string> {
   margin-top: 0.12rem;
 }
 
+.error-tip {
+  margin: 0.2rem 0 0;
+  color: #ffd8a8;
+  background: rgba(71, 24, 13, 0.8);
+  border: 1px solid rgba(235, 145, 113, 0.7);
+  border-radius: 0.3rem;
+  padding: 0.22rem 0.52rem;
+  font-size: 0.72rem;
+  line-height: 1.2;
+}
+
+.action-toast {
+  position: absolute;
+  top: 0.55rem;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 0.26rem 0.62rem;
+  border-radius: 999px;
+  border: 1px solid rgba(233, 203, 124, 0.74);
+  background: rgba(5, 8, 14, 0.88);
+  color: #f6ddad;
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  z-index: 40;
+}
+
+.toast-fade-enter-active,
+.toast-fade-leave-active {
+  transition: opacity 0.16s ease;
+}
+
+.toast-fade-enter-from,
+.toast-fade-leave-to {
+  opacity: 0;
+}
+
 @media (max-width: 768px) {
   .actions-wrap {
     margin-top: 0.2rem;
+  }
+
+  .action-toast {
+    top: 0.4rem;
+    font-size: 0.68rem;
   }
 }
 </style>

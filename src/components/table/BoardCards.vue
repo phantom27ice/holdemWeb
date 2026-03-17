@@ -23,6 +23,7 @@ defineProps<{
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0.65rem;
   width: min(45vw, 360px);
+  animation: board-enter 0.2s ease-out;
 }
 
 .board-slot {
@@ -46,5 +47,16 @@ defineProps<{
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+@keyframes board-enter {
+  from {
+    opacity: 0.72;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 </style>

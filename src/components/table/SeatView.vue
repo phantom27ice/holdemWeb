@@ -5,6 +5,7 @@ import type { TableSeatViewModel } from '../../game/mock/createMockTableState'
 
 const props = defineProps<{
   seat: TableSeatViewModel
+  actionLabel?: string
 }>()
 
 const markerIcon = computed(() => {
@@ -26,6 +27,8 @@ const markerIcon = computed(() => {
       'is-allin': seat.isAllIn,
     }"
   >
+    <div v-if="actionLabel" class="action-badge">{{ actionLabel }}</div>
+
     <div class="avatar-wrap">
       <img :src="seat.avatar" :alt="seat.name" class="avatar" />
       <img v-if="markerIcon" class="role" :src="markerIcon" :alt="seat.role ?? ''" />
@@ -48,6 +51,22 @@ const markerIcon = computed(() => {
   position: relative;
   width: clamp(80px, 9vw, 104px);
   transition: filter 0.2s ease;
+}
+
+.action-badge {
+  position: absolute;
+  top: -1.15rem;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.14rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(7, 10, 15, 0.9);
+  border: 1px solid rgba(234, 204, 122, 0.65);
+  color: #f5deb1;
+  font-size: 0.62rem;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+  animation: badge-in 0.18s ease-out;
 }
 
 .seat-view.is-active .avatar-wrap {
@@ -128,5 +147,16 @@ const markerIcon = computed(() => {
 
 .cards.hidden {
   display: none;
+}
+
+@keyframes badge-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
 }
 </style>

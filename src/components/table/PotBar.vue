@@ -27,6 +27,7 @@ const chipIcon = resolveChipIcon()
   border-radius: 0.35rem;
   background: linear-gradient(180deg, #18140f 0%, #060403 100%);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  animation: pot-pulse 0.22s ease-out;
 }
 
 .chip-icon {
@@ -39,5 +40,16 @@ const chipIcon = resolveChipIcon()
   font-weight: 700;
   font-size: 1rem;
   line-height: 1;
+}
+
+@keyframes pot-pulse {
+  from {
+    transform: scale(0.97);
+    filter: brightness(0.9);
+  }
+  to {
+    transform: scale(1);
+    filter: brightness(1);
+  }
 }
 </style>
