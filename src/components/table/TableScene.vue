@@ -11,6 +11,7 @@ import { useTableStore } from '../../stores/tableStore'
 
 const tableStore = useTableStore()
 const { tableView } = storeToRefs(tableStore)
+const { heroFold, heroCallOrCheck, heroRaise } = tableStore
 
 onMounted(() => {
   tableStore.hydrateMockState()
@@ -69,6 +70,9 @@ function getSeatStyle(seat: number): Record<string, string> {
           :call-amount="tableView.legalActions.callAmount"
           :can-raise="tableView.legalActions.canRaise"
           :min-raise-to="tableView.legalActions.minRaiseTo"
+          @fold="heroFold"
+          @call-check="heroCallOrCheck"
+          @raise="heroRaise"
         />
       </div>
     </div>

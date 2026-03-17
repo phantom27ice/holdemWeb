@@ -84,6 +84,7 @@ export interface HandState {
 export type Action =
   | { type: 'START_HAND'; seed?: number }
   | { type: 'POST_FORCED_BETS' }
+  | { type: 'DEAL_HOLE_CARDS' }
   | { type: 'CHECK'; seat: number }
   | { type: 'FOLD'; seat: number }
   | { type: 'CALL'; seat: number }
@@ -104,6 +105,7 @@ export interface LegalAction {
 export interface EngineResult {
   state: HandState
   events: GameEvent[]
+  error?: EngineError
 }
 
 export type GameEvent =
@@ -115,3 +117,18 @@ export type GameEvent =
   | { type: 'SHOWDOWN_REVEAL'; seat: number; cards: Card[] }
   | { type: 'POT_AWARDED'; potId: string; winners: number[]; amount: number }
   | { type: 'HAND_FINISHED'; handId: number }
+
+export type EngineErrorCode =
+  | 'INVALID_PHASE'
+  | 'NOT_ACTOR_TURN'
+  | 'ILLEGAL_ACTION'
+  | 'INVALID_AMOUNT'
+  | 'PLAYER_NOT_FOUND'
+  | 'INVARIANT_VIOLATION'
+
+export interface EngineError {
+  code: EngineErrorCode
+  action: Action['type']
+  message: string
+  seat?: number
+}

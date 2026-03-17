@@ -1,4 +1,10 @@
 <script setup lang="ts">
+const emit = defineEmits<{
+  fold: []
+  callCheck: []
+  raise: []
+}>()
+
 defineProps<{
   canFold: boolean
   canCheck: boolean
@@ -11,11 +17,13 @@ defineProps<{
 
 <template>
   <div class="action-panel">
-    <button class="action fold" :disabled="!canFold">FOLD</button>
-    <button class="action call" :disabled="!(canCheck || canCall)">
+    <button class="action fold" :disabled="!canFold" @click="emit('fold')">FOLD</button>
+    <button class="action call" :disabled="!(canCheck || canCall)" @click="emit('callCheck')">
       {{ canCheck ? 'CHECK' : `CALL ${callAmount}` }}
     </button>
-    <button class="action raise" :disabled="!canRaise">RAISE {{ minRaiseTo }}</button>
+    <button class="action raise" :disabled="!canRaise" @click="emit('raise')">
+      RAISE {{ minRaiseTo }}
+    </button>
   </div>
 </template>
 
