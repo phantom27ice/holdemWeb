@@ -88,4 +88,74 @@ describe('tableStore', () => {
       expect(heroApplied.action).toBe(timeoutEvent.fallback)
     }
   })
+
+  it('auto-applies timeout fallback for AI turn when think delay exceeds timeout', () => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(999)
+
+    const store = useTableStore()
+    store.hydrateMockState()
+
+    store.consumeEvents()
+    expect(store.handState.toActSeat).not.toBe(HERO_SEAT)
+
+    vi.advanceTimersByTime(5999)
+    expect(store.events).toHaveLength(0)
+
+    vi.advanceTimersByTime(1)
+    const timeoutBatch = store.consumeEvents()
+    const timeoutEvent = timeoutBatch.find((event) => event.type === 'TURN_TIMEOUT')
+    const aiApplied = timeoutBatch.find(
+      (event) =>
+        event.type === 'ACTION_APPLIED' &&
+        event.seat !== HERO_SEAT &&
+        (event.action === 'CHECK' || event.action === 'FOLD'),
+    )
+
+    expect(timeoutEvent).toBeTruthy()
+    expect(aiApplied).toBeTruthy()
+
+    if (timeoutEvent?.type === 'TURN_TIMEOUT' && aiApplied?.type === 'ACTION_APPLIED') {
+      expect(aiApplied.seat).toBe(timeoutEvent.seat)
+      expect(aiApplied.action).toBe(timeoutEvent.fallback)
+    }
+  })
+
+  it('resolves hero timeout exactly once when countdown reaches zero', () => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+
+    const store = useTableStore()
+    store.hydrateMockState()
+    store.consumeEvents()
+
+    let guard = 0
+    while (store.handState.toActSeat !== HERO_SEAT && guard < 8) {
+      guard += 1
+      vi.advanceTimersByTime(700)
+      store.consumeEvents()
+    }
+
+    expect(store.handState.toActSeat).toBe(HERO_SEAT)
+
+    vi.advanceTimersByTime(12000)
+    const firstBatch = store.consumeEvents()
+    const heroTimeoutEvents = firstBatch.filter(
+      (event) => event.type === 'TURN_TIMEOUT' && event.seat === HERO_SEAT,
+    )
+    const heroAppliedEvents = firstBatch.filter(
+      (event) => event.type === 'ACTION_APPLIED' && event.seat === HERO_SEAT,
+    )
+
+    expect(heroTimeoutEvents).toHaveLength(1)
+    expect(heroAppliedEvents).toHaveLength(1)
+
+    vi.advanceTimersByTime(5000)
+    const laterBatch = store.consumeEvents()
+    const duplicatedHeroTimeouts = laterBatch.filter(
+      (event) => event.type === 'TURN_TIMEOUT' && event.seat === HERO_SEAT,
+    )
+
+    expect(duplicatedHeroTimeouts).toHaveLength(0)
+  })
 })
