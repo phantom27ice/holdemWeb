@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:regression": "vitest run src/game/engine/__tests__/regressionMatrix.test.ts src/stores/__tests__/tableStore.test.ts"
   },
   "dependencies": {
     "pinia": "^3.0.4",

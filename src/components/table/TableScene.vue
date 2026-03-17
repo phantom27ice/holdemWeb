@@ -7,14 +7,24 @@ import BoardCards from './BoardCards.vue'
 import HoleCards from './HoleCards.vue'
 import SeatView from './SeatView.vue'
 import ActionPanel from './ActionPanel.vue'
+import ChipFlyLayer from './ChipFlyLayer.vue'
 import { useTableStore } from '../../stores/tableStore'
 import type { EngineError, GameEvent } from '../../game/types'
 
 type ActionAppliedType = 'CHECK' | 'CALL' | 'FOLD' | 'BET' | 'RAISE' | 'ALL_IN'
+type ChipFlight = {
+  id: string
+  fromX: number
+  fromY: number
+  toX: number
+  toY: number
+  amount: number
+  kind: 'to-pot' | 'to-seat'
+}
 
 const tableStore = useTableStore()
 const { tableView, events, lastEngineError } = storeToRefs(tableStore)
-const { heroFold, heroCallOrCheck, heroRaise } = tableStore
+const { heroFold, heroCallOrCheck, heroRaise, consumeEvents } = tableStore
 
 onMounted(() => {
   tableStore.hydrateMockState()
@@ -35,20 +45,22 @@ const seatActionHints = ref<Record<number, string>>({})
 const actionToast = ref<string | null>(null)
 const boardAnimationKey = ref(0)
 const potAnimationKey = ref(0)
+const chipFlights = ref<ChipFlight[]>([])
 
 const seatHintTimers = new Map<number, number>()
 let actionToastTimer: number | null = null
+let chipFlightSeq = 0
 
 watch(
   () => events.value.length,
-  (current, previous) => {
-    if (current <= previous || current === 0) {
+  (current) => {
+    if (current <= 0) {
       return
     }
 
-    const latest = events.value[current - 1]
-    if (latest) {
-      applyEventFeedback(latest)
+    const batch = consumeEvents()
+    for (const item of batch) {
+      applyEventFeedback(item)
     }
   },
 )
@@ -72,6 +84,8 @@ onBeforeUnmount(() => {
   if (actionToastTimer !== null) {
     window.clearTimeout(actionToastTimer)
   }
+
+  chipFlights.value = []
 })
 
 function getSeatStyle(seat: number): Record<string, string> {
@@ -89,6 +103,18 @@ function applyEventFeedback(event: GameEvent): void {
     const label = formatActionLabel(event.action as ActionAppliedType, event.amount)
     setSeatActionHint(event.seat, label)
     showToast(`${getSeatName(event.seat)} ${label}`)
+
+    if (event.amount > 0) {
+      const from = toSeatPoint(event.seat)
+      queueChipFlight({
+        fromX: from.x,
+        fromY: from.y,
+        toX: 50,
+        toY: 50,
+        amount: event.amount,
+        kind: 'to-pot',
+      })
+    }
 
     if (event.amount > 0 || event.action === 'BET' || event.action === 'RAISE') {
       potAnimationKey.value += 1
@@ -111,6 +137,19 @@ function applyEventFeedback(event: GameEvent): void {
   if (event.type === 'POT_AWARDED') {
     potAnimationKey.value += 1
     showToast(`派奖 ${event.amount}`)
+
+    const perWinner = Math.max(1, Math.floor(event.amount / Math.max(1, event.winners.length)))
+    for (const seat of event.winners) {
+      const to = toSeatPoint(seat)
+      queueChipFlight({
+        fromX: 50,
+        fromY: 50,
+        toX: to.x,
+        toY: to.y,
+        amount: perWinner,
+        kind: 'to-seat',
+      })
+    }
   }
 }
 
@@ -146,6 +185,25 @@ function showToast(message: string): void {
     actionToast.value = null
     actionToastTimer = null
   }, 1500)
+}
+
+function queueChipFlight(input: Omit<ChipFlight, 'id'>): void {
+  chipFlights.value.push({
+    id: `f-${Date.now()}-${chipFlightSeq++}`,
+    ...input,
+  })
+}
+
+function onChipFlightDone(id: string): void {
+  chipFlights.value = chipFlights.value.filter((flight) => flight.id !== id)
+}
+
+function toSeatPoint(seat: number): { x: number; y: number } {
+  const anchor = seatAnchors[seat] ?? { x: 0, y: 0 }
+  return {
+    x: 50 + anchor.x * 42,
+    y: 50 + anchor.y * 40,
+  }
 }
 
 function getSeatName(seat: number): string {
@@ -208,6 +266,10 @@ function formatEngineError(error: EngineError): string {
         <div v-if="heroSeat" class="hero-layer" :style="getSeatStyle(heroSeat.seat)">
           <SeatView :seat="heroSeat" :action-label="seatActionHints[heroSeat.seat]" />
           <HoleCards :cards="heroSeat.cards" />
+        </div>
+
+        <div class="chip-layer-wrap">
+          <ChipFlyLayer :flights="chipFlights" @done="onChipFlightDone" />
         </div>
       </TableShell>
 
@@ -282,6 +344,13 @@ function formatEngineError(error: EngineError): string {
 
 .actions-wrap {
   margin-top: 0.12rem;
+}
+
+.chip-layer-wrap {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 30;
 }
 
 .error-tip {

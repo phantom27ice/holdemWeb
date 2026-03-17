@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { computed, ref, shallowRef } from 'vue'
 import { defineStore } from 'pinia'
 import {
   createInitialHandState,
@@ -16,7 +16,7 @@ import {
 const AI_LOOP_GUARD = 256
 
 export const useTableStore = defineStore('table', () => {
-  const handState = ref<HandState>(
+  const handState = shallowRef<HandState>(
     createInitialHandState(DEMO_PLAYERS, DEFAULT_ENGINE_CONFIG),
   )
   const events = ref<GameEvent[]>([])
@@ -159,6 +159,16 @@ export const useTableStore = defineStore('table', () => {
     events.value.push(...result.events)
   }
 
+  function consumeEvents(): GameEvent[] {
+    if (events.value.length === 0) {
+      return []
+    }
+
+    const batch = [...events.value]
+    events.value = []
+    return batch
+  }
+
   return {
     handState,
     events,
@@ -169,6 +179,7 @@ export const useTableStore = defineStore('table', () => {
     heroFold,
     heroCallOrCheck,
     heroRaise,
+    consumeEvents,
   }
 })
 
