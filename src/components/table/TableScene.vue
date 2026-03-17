@@ -7,9 +7,15 @@ import BoardCards from "./BoardCards.vue";
 import HoleCards from "./HoleCards.vue";
 import SeatView from "./SeatView.vue";
 import ActionPanel from "./ActionPanel.vue";
+import ShowdownPanel from "./ShowdownPanel.vue";
 import ChipFlyLayer from "./ChipFlyLayer.vue";
 import DealCardLayer from "./DealCardLayer.vue";
 import { useTableStore } from "../../stores/tableStore";
+import { evaluate7 } from "../../game/engine";
+import {
+  formatHandCategoryZh,
+  formatPotIdZh,
+} from "../../game/ui/showdownFormatter";
 import {
   resolvePokerBack,
   resolvePokerCard,
@@ -39,6 +45,18 @@ type DealFlight = {
   backUrl: string;
   frontUrl?: string;
   flipAtEnd?: boolean;
+};
+type ShowdownRevealItem = {
+  seat: number;
+  name: string;
+  cards: string[];
+  handLabel: string;
+};
+type ShowdownPotItem = {
+  id: string;
+  potIdLabel: string;
+  winnerNames: string;
+  amount: number;
 };
 
 const DEAL_DECK_POINT = { x: 50, y: 50 };
@@ -87,6 +105,8 @@ const dealFlights = ref<DealFlight[]>([]);
 const holeCardsLocked = ref(true);
 const activeHoleDealCount = ref(0);
 const pendingBoardDeals = ref<Array<{ street: Street; cards: Card[] }>>([]);
+const showdownReveals = ref<Record<number, ShowdownRevealItem>>({});
+const showdownPots = ref<ShowdownPotItem[]>([]);
 const animationLocked = computed(
   () => dealFlights.value.length > 0 || chipFlights.value.length > 0,
 );
@@ -112,6 +132,35 @@ const turnPromptText = computed(() => {
     tempo.actorSeat === tableView.value.heroSeat ? "请你行动" : "行动中";
   return `轮到 ${seatName}${suffix} · ${seconds}s`;
 });
+const showdownRevealList = computed(() =>
+  Object.values(showdownReveals.value).sort((a, b) => a.seat - b.seat),
+);
+const showdownWinnerSummary = computed(() => {
+  if (showdownPots.value.length === 0) {
+    return "";
+  }
+
+  const winnerSet = new Set<string>();
+  for (const pot of showdownPots.value) {
+    for (const name of pot.winnerNames.split("、")) {
+      const trimmed = name.trim();
+      if (trimmed) {
+        winnerSet.add(trimmed);
+      }
+    }
+  }
+
+  if (winnerSet.size === 0) {
+    return "";
+  }
+
+  return `赢家：${[...winnerSet].join("、")}`;
+});
+const showdownVisible = computed(
+  () =>
+    showdownRevealList.value.length > 0 ||
+    showdownPots.value.length > 0,
+);
 
 const seatHintTimers = new Map<number, number>();
 const pendingHoleDeals = new Map<number, number>();
@@ -168,6 +217,7 @@ onBeforeUnmount(() => {
   dealFlights.value = [];
   pendingHoleDeals.clear();
   pendingBoardDeals.value = [];
+  resetShowdownSummary();
   dealBusyUntilMs = 0;
   activeHoleDealCount.value = 0;
   holeCardsLocked.value = false;
@@ -209,11 +259,37 @@ function getSeatTurnLabel(seat: number): string | null {
   return "行动中";
 }
 
+function resetShowdownSummary(): void {
+  showdownReveals.value = {};
+  showdownPots.value = [];
+}
+
+function upsertShowdownReveal(seat: number, cards: Card[]): void {
+  const boardCards = [...handState.value.board];
+  let handLabel = "摊牌";
+
+  if (cards.length === 2 && boardCards.length === 5) {
+    const evaluated = evaluate7([...cards, ...boardCards]);
+    handLabel = formatHandCategoryZh(evaluated.rank.category);
+  }
+
+  showdownReveals.value = {
+    ...showdownReveals.value,
+    [seat]: {
+      seat,
+      name: getSeatName(seat),
+      cards: cards.map((card) => resolvePokerCard(card)),
+      handLabel,
+    },
+  };
+}
+
 function applyEventFeedback(event: GameEvent): void {
   if (event.type === "HAND_STARTED") {
     pendingHoleDeals.clear();
     pendingBoardDeals.value = [];
     dealFlights.value = [];
+    resetShowdownSummary();
     dealBusyUntilMs = 0;
     activeHoleDealCount.value = 0;
     holeCardsLocked.value = true;
@@ -278,9 +354,29 @@ function applyEventFeedback(event: GameEvent): void {
     return;
   }
 
+  if (event.type === "SHOWDOWN_REVEAL") {
+    upsertShowdownReveal(event.seat, event.cards);
+    const reveal = showdownReveals.value[event.seat];
+    if (reveal) {
+      showToast(`${reveal.name} 摊牌 ${reveal.handLabel}`);
+    }
+    return;
+  }
+
   if (event.type === "POT_AWARDED") {
     potAnimationKey.value += 1;
     showToast(`派奖 ${event.amount}`);
+
+    const winnerNames = event.winners.map((seat) => getSeatName(seat)).join("、");
+    showdownPots.value = [
+      ...showdownPots.value,
+      {
+        id: `${event.potId}-${showdownPots.value.length}`,
+        potIdLabel: formatPotIdZh(event.potId),
+        winnerNames: winnerNames || "未知",
+        amount: event.amount,
+      },
+    ];
 
     const perWinner = Math.max(
       1,
@@ -817,6 +913,17 @@ function formatEngineError(error: EngineError): string {
           {{ turnPromptText }}
         </p>
 
+        <transition name="showdown-fade">
+          <div v-if="showdownVisible" class="showdown-panel-wrap">
+            <ShowdownPanel
+              :visible="true"
+              :reveals="showdownRevealList"
+              :pots="showdownPots"
+              :winner-summary="showdownWinnerSummary"
+            />
+          </div>
+        </transition>
+
         <div
           v-for="seat in opponents"
           :key="seat.seat"
@@ -948,6 +1055,29 @@ function formatEngineError(error: EngineError): string {
   z-index: 28;
 }
 
+.showdown-panel-wrap {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 0 0.8rem;
+  pointer-events: none;
+  z-index: 29;
+}
+
+.showdown-fade-enter-active,
+.showdown-fade-leave-active {
+  transition:
+    opacity 0.22s ease,
+    transform 0.22s ease;
+}
+
+.showdown-fade-enter-from,
+.showdown-fade-leave-to {
+  opacity: 0;
+  transform: scale(0.96);
+}
+
 .seat-layer,
 .hero-layer {
   position: absolute;
@@ -1045,6 +1175,10 @@ function formatEngineError(error: EngineError): string {
     transform: translate(-50%, -142%);
     font-size: 0.66rem;
   }
+
+  .showdown-panel-wrap {
+    padding: 0 0.58rem;
+  }
 }
 
 @media (max-width: 1024px) and (min-width: 769px) {
@@ -1063,11 +1197,19 @@ function formatEngineError(error: EngineError): string {
   .actions-wrap {
     margin-top: 1rem;
   }
+
+  .showdown-panel-wrap {
+    padding: 0 0.7rem;
+  }
 }
 
 @media (max-width: 480px) {
   .actions-wrap {
     margin-top: 1.85rem;
+  }
+
+  .showdown-panel-wrap {
+    padding: 0 0.3rem;
   }
 }
 </style>
