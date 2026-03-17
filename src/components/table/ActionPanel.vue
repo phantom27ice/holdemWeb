@@ -5,24 +5,36 @@ const emit = defineEmits<{
   raise: []
 }>()
 
-defineProps<{
-  canFold: boolean
-  canCheck: boolean
-  canCall: boolean
-  callAmount: number
-  canRaise: boolean
-  minRaiseTo: number
-}>()
+const props = withDefaults(
+  defineProps<{
+    canFold: boolean
+    canCheck: boolean
+    canCall: boolean
+    callAmount: number
+    canRaise: boolean
+    minRaiseTo: number
+    locked?: boolean
+  }>(),
+  {
+    locked: false,
+  },
+)
 </script>
 
 <template>
   <div class="action-panel">
-    <button class="action fold" :disabled="!canFold" @click="emit('fold')">FOLD</button>
-    <button class="action call" :disabled="!(canCheck || canCall)" @click="emit('callCheck')">
-      {{ canCheck ? 'CHECK' : `CALL ${callAmount}` }}
+    <button class="action fold" :disabled="props.locked || !props.canFold" @click="emit('fold')">
+      FOLD
     </button>
-    <button class="action raise" :disabled="!canRaise" @click="emit('raise')">
-      RAISE {{ minRaiseTo }}
+    <button
+      class="action call"
+      :disabled="props.locked || !(props.canCheck || props.canCall)"
+      @click="emit('callCheck')"
+    >
+      {{ props.canCheck ? 'CHECK' : `CALL ${props.callAmount}` }}
+    </button>
+    <button class="action raise" :disabled="props.locked || !props.canRaise" @click="emit('raise')">
+      RAISE {{ props.minRaiseTo }}
     </button>
   </div>
 </template>

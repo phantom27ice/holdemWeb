@@ -6,6 +6,7 @@ import type { TableSeatViewModel } from '../../game/mock/createMockTableState'
 const props = defineProps<{
   seat: TableSeatViewModel
   actionLabel?: string
+  hideCards?: boolean
 }>()
 
 const markerIcon = computed(() => {
@@ -40,7 +41,7 @@ const markerIcon = computed(() => {
       <p v-if="seat.bet > 0" class="bet">下注 {{ seat.bet }}</p>
     </div>
 
-    <div class="cards" :class="{ hidden: seat.cardsFaceUp }">
+    <div class="cards" :class="{ hidden: seat.cardsFaceUp || hideCards }">
       <img v-for="(card, index) in seat.cards" :key="index" :src="card" alt="card" />
     </div>
   </article>

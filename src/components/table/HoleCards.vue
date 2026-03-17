@@ -1,12 +1,24 @@
 <script setup lang="ts">
-defineProps<{
-  cards: string[]
-}>()
+const props = withDefaults(
+  defineProps<{
+    cards: string[]
+    hidden?: boolean
+  }>(),
+  {
+    hidden: false,
+  },
+)
 </script>
 
 <template>
-  <div class="hole-cards">
-    <img v-for="(card, index) in cards" :key="index" :src="card" alt="hole card" class="card" />
+  <div class="hole-cards" :class="{ 'is-hidden': props.hidden }">
+    <img
+      v-for="(card, index) in props.cards"
+      :key="index"
+      :src="card"
+      alt="hole card"
+      class="card"
+    />
   </div>
 </template>
 
@@ -15,6 +27,12 @@ defineProps<{
   display: flex;
   align-items: center;
   gap: 0.45rem;
+  transition: opacity 0.12s ease;
+}
+
+.hole-cards.is-hidden {
+  opacity: 0;
+  visibility: hidden;
 }
 
 .card {
