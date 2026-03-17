@@ -50,7 +50,7 @@ const DEAL_BOARD_DURATION_MS = 250;
 const DEAL_LAYOUT_WAIT_MAX_FRAMES = 12;
 
 const tableStore = useTableStore();
-const { handState, tableView, events, lastEngineError } =
+const { handState, tableView, turnTempo, events, lastEngineError } =
   storeToRefs(tableStore);
 const { heroFold, heroCallOrCheck, heroRaise, consumeEvents } = tableStore;
 
@@ -83,10 +83,34 @@ const boardAnimationKey = ref(0);
 const potAnimationKey = ref(0);
 const chipFlights = ref<ChipFlight[]>([]);
 const dealFlights = ref<DealFlight[]>([]);
-const actionLocked = computed(() => dealFlights.value.length > 0);
 const holeCardsLocked = ref(true);
 const activeHoleDealCount = ref(0);
 const pendingBoardDeals = ref<Array<{ street: Street; cards: Card[] }>>([]);
+const animationLocked = computed(
+  () => dealFlights.value.length > 0 || chipFlights.value.length > 0,
+);
+const isHeroTurn = computed(() => {
+  const hero = heroSeat.value;
+  if (!hero) {
+    return false;
+  }
+
+  const tempo = turnTempo.value;
+  return tempo.isRunning && tempo.actorSeat === hero.seat;
+});
+const actionLocked = computed(() => animationLocked.value || !isHeroTurn.value);
+const turnPromptText = computed(() => {
+  const tempo = turnTempo.value;
+  if (!tempo.isRunning || tempo.actorSeat < 0) {
+    return null;
+  }
+
+  const seconds = Math.max(0, Math.ceil(tempo.remainingMs / 1000));
+  const seatName = getSeatName(tempo.actorSeat);
+  const suffix =
+    tempo.actorSeat === tableView.value.heroSeat ? "请你行动" : "行动中";
+  return `轮到 ${seatName}${suffix} · ${seconds}s`;
+});
 
 const seatHintTimers = new Map<number, number>();
 const pendingHoleDeals = new Map<number, number>();
@@ -166,6 +190,24 @@ function getSeatStyle(seat: number): Record<string, string> {
   };
 }
 
+function getSeatTurnSeconds(seat: number): number | null {
+  const tempo = turnTempo.value;
+  if (!tempo.isRunning || tempo.actorSeat !== seat) {
+    return null;
+  }
+
+  return Math.max(0, Math.ceil(tempo.remainingMs / 1000));
+}
+
+function getSeatTurnLabel(seat: number): string | null {
+  const tempo = turnTempo.value;
+  if (!tempo.isRunning || tempo.actorSeat !== seat) {
+    return null;
+  }
+
+  return "行动中";
+}
+
 function applyEventFeedback(event: GameEvent): void {
   if (event.type === "HAND_STARTED") {
     pendingHoleDeals.clear();
@@ -210,6 +252,12 @@ function applyEventFeedback(event: GameEvent): void {
     ) {
       potAnimationKey.value += 1;
     }
+    return;
+  }
+
+  if (event.type === "TURN_TIMEOUT") {
+    const actionText = event.fallback === "CHECK" ? "过牌" : "弃牌";
+    showToast(`${getSeatName(event.seat)} 超时自动${actionText}`);
     return;
   }
 
@@ -764,6 +812,10 @@ function formatEngineError(error: EngineError): string {
           <BoardCards :key="boardAnimationKey" :board="tableView.board" />
         </div>
 
+        <p v-if="turnPromptText" class="turn-prompt">
+          {{ turnPromptText }}
+        </p>
+
         <div
           v-for="seat in opponents"
           :key="seat.seat"
@@ -773,7 +825,9 @@ function formatEngineError(error: EngineError): string {
           <SeatView
             :seat="seat"
             :action-label="seatActionHints[seat.seat]"
+            :turn-label="getSeatTurnLabel(seat.seat)"
             :hide-cards="holeCardsLocked"
+            :turn-seconds="getSeatTurnSeconds(seat.seat)"
           />
         </div>
 
@@ -785,6 +839,8 @@ function formatEngineError(error: EngineError): string {
           <SeatView
             :seat="heroSeat"
             :action-label="seatActionHints[heroSeat.seat]"
+            :turn-label="getSeatTurnLabel(heroSeat.seat)"
+            :turn-seconds="getSeatTurnSeconds(heroSeat.seat)"
           />
           <HoleCards :cards="heroSeat.cards" :hidden="holeCardsLocked" />
         </div>
@@ -865,6 +921,23 @@ function formatEngineError(error: EngineError): string {
   left: 50%;
   top: 50%;
   transform: translate(-50%, -54%);
+}
+
+.turn-prompt {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -150%);
+  margin: 0;
+  padding: 0.18rem 0.56rem;
+  border-radius: 999px;
+  border: 1px solid rgba(126, 211, 171, 0.78);
+  background: rgba(5, 11, 14, 0.88);
+  color: #8ef3cb;
+  font-size: 0.7rem;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  z-index: 28;
 }
 
 .seat-layer,
@@ -958,6 +1031,11 @@ function formatEngineError(error: EngineError): string {
   .action-toast {
     top: 0.4rem;
     font-size: 0.68rem;
+  }
+
+  .turn-prompt {
+    transform: translate(-50%, -142%);
+    font-size: 0.66rem;
   }
 }
 

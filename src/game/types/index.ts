@@ -113,6 +113,7 @@ export type GameEvent =
   | { type: 'HAND_STARTED'; handId: number }
   | { type: 'CARDS_DEALT'; seat: number; count: number }
   | { type: 'BOARD_DEALT'; street: Street; cards: Card[] }
+  | { type: 'TURN_TIMEOUT'; seat: number; fallback: 'CHECK' | 'FOLD' }
   | { type: 'ACTION_APPLIED'; seat: number; action: Action['type']; amount: number }
   | { type: 'STREET_ENDED'; street: Street }
   | { type: 'SHOWDOWN_REVEAL'; seat: number; cards: Card[] }

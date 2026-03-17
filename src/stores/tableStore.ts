@@ -5,7 +5,13 @@ import {
   dispatch as dispatchEngine,
   getLegalActions,
 } from '../game/engine'
-import type { Action, EngineError, GameEvent, HandState } from '../game/types'
+import type {
+  Action,
+  EngineError,
+  GameEvent,
+  HandState,
+  LegalAction,
+} from '../game/types'
 import {
   DEFAULT_ENGINE_CONFIG,
   DEMO_PLAYERS,
@@ -13,7 +19,20 @@ import {
   toTableViewModel,
 } from '../game/mock/createMockTableState'
 
-const AI_LOOP_GUARD = 256
+const AI_THINK_DELAY_MIN_MS = 700
+const AI_THINK_DELAY_MAX_MS = 1400
+const AI_TURN_TIMEOUT_MS = 6000
+const HERO_TURN_TIMEOUT_MS = 12000
+const TURN_TICK_INTERVAL_MS = 100
+const NEXT_HAND_DELAY_MS = 900
+
+export interface TurnTempoState {
+  actorSeat: number
+  remainingMs: number
+  totalMs: number
+  isHeroTurn: boolean
+  isRunning: boolean
+}
 
 export const useTableStore = defineStore('table', () => {
   const handState = shallowRef<HandState>(
@@ -21,10 +40,16 @@ export const useTableStore = defineStore('table', () => {
   )
   const events = ref<GameEvent[]>([])
   const lastEngineError = ref<EngineError | null>(null)
+  const turnTempo = ref<TurnTempoState>(createIdleTurnTempo())
+  let schedulerToken = 0
+  let schedulerTimer: ReturnType<typeof setTimeout> | null = null
+  let turnTimeoutTimer: ReturnType<typeof setTimeout> | null = null
+  let turnTickTimer: ReturnType<typeof setInterval> | null = null
 
   const tableView = computed(() => toTableViewModel(handState.value))
 
   function hydrateMockState(): void {
+    resetScheduler()
     handState.value = createInitialHandState(DEMO_PLAYERS, DEFAULT_ENGINE_CONFIG)
     events.value = []
     lastEngineError.value = null
@@ -35,7 +60,7 @@ export const useTableStore = defineStore('table', () => {
     applyAction({ type: 'START_HAND' })
     applyAction({ type: 'POST_FORCED_BETS' })
     applyAction({ type: 'DEAL_HOLE_CARDS' })
-    runAiUntilHeroTurn()
+    scheduleEngineProgress()
   }
 
   function heroFold(): void {
@@ -44,7 +69,7 @@ export const useTableStore = defineStore('table', () => {
     }
 
     applyAction({ type: 'FOLD', seat: HERO_SEAT })
-    runAiUntilHeroTurn()
+    scheduleEngineProgress()
   }
 
   function heroCallOrCheck(): void {
@@ -60,7 +85,7 @@ export const useTableStore = defineStore('table', () => {
       applyAction({ type: 'CALL', seat: HERO_SEAT })
     }
 
-    runAiUntilHeroTurn()
+    scheduleEngineProgress()
   }
 
   function heroRaise(): void {
@@ -78,7 +103,7 @@ export const useTableStore = defineStore('table', () => {
         seat: HERO_SEAT,
         amountTo: raiseAction.minAmountTo,
       })
-      runAiUntilHeroTurn()
+      scheduleEngineProgress()
       return
     }
 
@@ -88,50 +113,173 @@ export const useTableStore = defineStore('table', () => {
         seat: HERO_SEAT,
         amountTo: betAction.minAmountTo,
       })
-      runAiUntilHeroTurn()
+      scheduleEngineProgress()
     }
   }
 
-  function runAiUntilHeroTurn(): void {
-    let loop = 0
+  function scheduleEngineProgress(): void {
+    schedulerToken += 1
+    const token = schedulerToken
+    clearSchedulerTimers()
+    stopTurnTempo()
 
-    while (loop < AI_LOOP_GUARD) {
-      loop += 1
+    const snapshot = handState.value
 
-      if (handState.value.phase === 'PAYOUT') {
-        const started = startNextHandIfPossible()
-        if (!started) {
-          break
+    if (snapshot.phase === 'PAYOUT') {
+      schedulerTimer = setTimeout(() => {
+        if (token !== schedulerToken) {
+          return
         }
-        continue
-      }
 
-      if (!isHandRunning(handState.value.phase)) {
-        break
-      }
+        if (handState.value.phase !== 'PAYOUT') {
+          scheduleEngineProgress()
+          return
+        }
 
-      const seat = handState.value.toActSeat
-      if (seat === HERO_SEAT || seat < 0) {
-        break
-      }
-
-      const legalActions = getLegalActions(handState.value, seat)
-      if (legalActions.length === 0) {
-        break
-      }
-
-      if (legalActions.some((item) => item.type === 'CHECK')) {
-        applyAction({ type: 'CHECK', seat })
-        continue
-      }
-
-      if (legalActions.some((item) => item.type === 'CALL')) {
-        applyAction({ type: 'CALL', seat })
-        continue
-      }
-
-      applyAction({ type: 'FOLD', seat })
+        const started = startNextHandIfPossible()
+        if (started) {
+          scheduleEngineProgress()
+        }
+      }, NEXT_HAND_DELAY_MS)
+      return
     }
+
+    if (!isHandRunning(snapshot.phase)) {
+      return
+    }
+
+    const seat = snapshot.toActSeat
+    if (seat < 0) {
+      return
+    }
+
+    const legalActions = getLegalActions(snapshot, seat)
+    if (legalActions.length === 0) {
+      return
+    }
+
+    const heroTurn = seat === HERO_SEAT
+    const turnTimeoutMs = heroTurn ? HERO_TURN_TIMEOUT_MS : AI_TURN_TIMEOUT_MS
+    startTurnTempo(seat, turnTimeoutMs)
+
+    turnTimeoutTimer = setTimeout(() => {
+      if (token !== schedulerToken) {
+        return
+      }
+
+      const latest = handState.value
+      if (!isHandRunning(latest.phase)) {
+        scheduleEngineProgress()
+        return
+      }
+
+      const latestSeat = latest.toActSeat
+      if (latestSeat !== seat || latestSeat < 0) {
+        scheduleEngineProgress()
+        return
+      }
+
+      const latestLegalActions = getLegalActions(latest, latestSeat)
+      const action = pickTimeoutAction(latestSeat, latestLegalActions)
+      if (!action) {
+        scheduleEngineProgress()
+        return
+      }
+
+      const fallback = action.type
+      applyAction(action)
+      events.value.push({
+        type: 'TURN_TIMEOUT',
+        seat: latestSeat,
+        fallback,
+      })
+      scheduleEngineProgress()
+    }, turnTimeoutMs)
+
+    if (heroTurn) {
+      return
+    }
+
+    schedulerTimer = setTimeout(() => {
+      if (token !== schedulerToken) {
+        return
+      }
+
+      const latest = handState.value
+      if (!isHandRunning(latest.phase)) {
+        scheduleEngineProgress()
+        return
+      }
+
+      const latestSeat = latest.toActSeat
+      if (latestSeat !== seat || latestSeat < 0) {
+        scheduleEngineProgress()
+        return
+      }
+
+      const latestLegalActions = getLegalActions(latest, latestSeat)
+      const action = pickAiAction(latestSeat, latestLegalActions)
+      if (!action) {
+        scheduleEngineProgress()
+        return
+      }
+
+      applyAction(action)
+      scheduleEngineProgress()
+    }, randomAiDelayMs())
+  }
+
+  function resetScheduler(): void {
+    clearSchedulerTimers()
+    stopTurnTempo()
+    schedulerToken += 1
+  }
+
+  function clearSchedulerTimers(): void {
+    if (schedulerTimer === null) {
+      // no-op
+    } else {
+      clearTimeout(schedulerTimer)
+      schedulerTimer = null
+    }
+
+    if (turnTimeoutTimer === null) {
+      // no-op
+    } else {
+      clearTimeout(turnTimeoutTimer)
+      turnTimeoutTimer = null
+    }
+
+    if (turnTickTimer === null) {
+      return
+    }
+
+    clearInterval(turnTickTimer)
+    turnTickTimer = null
+  }
+
+  function startTurnTempo(actorSeat: number, totalMs: number): void {
+    const startedAt = Date.now()
+
+    turnTempo.value = {
+      actorSeat,
+      remainingMs: totalMs,
+      totalMs,
+      isHeroTurn: actorSeat === HERO_SEAT,
+      isRunning: true,
+    }
+
+    turnTickTimer = setInterval(() => {
+      const elapsed = Date.now() - startedAt
+      turnTempo.value = {
+        ...turnTempo.value,
+        remainingMs: Math.max(0, totalMs - elapsed),
+      }
+    }, TURN_TICK_INTERVAL_MS)
+  }
+
+  function stopTurnTempo(): void {
+    turnTempo.value = createIdleTurnTempo()
   }
 
   function startNextHandIfPossible(): boolean {
@@ -173,6 +321,7 @@ export const useTableStore = defineStore('table', () => {
     handState,
     events,
     lastEngineError,
+    turnTempo,
     tableView,
     hydrateMockState,
     startHand,
@@ -182,6 +331,49 @@ export const useTableStore = defineStore('table', () => {
     consumeEvents,
   }
 })
+
+function pickAiAction(seat: number, legalActions: LegalAction[]): Action | null {
+  if (legalActions.some((item) => item.type === 'CHECK')) {
+    return { type: 'CHECK', seat }
+  }
+
+  if (legalActions.some((item) => item.type === 'CALL')) {
+    return { type: 'CALL', seat }
+  }
+
+  if (legalActions.some((item) => item.type === 'FOLD')) {
+    return { type: 'FOLD', seat }
+  }
+
+  return null
+}
+
+function pickTimeoutAction(seat: number, legalActions: LegalAction[]): Action | null {
+  if (legalActions.some((item) => item.type === 'CHECK')) {
+    return { type: 'CHECK', seat }
+  }
+
+  if (legalActions.some((item) => item.type === 'FOLD')) {
+    return { type: 'FOLD', seat }
+  }
+
+  return null
+}
+
+function randomAiDelayMs(): number {
+  const spread = AI_THINK_DELAY_MAX_MS - AI_THINK_DELAY_MIN_MS
+  return AI_THINK_DELAY_MIN_MS + Math.floor(Math.random() * (spread + 1))
+}
+
+function createIdleTurnTempo(): TurnTempoState {
+  return {
+    actorSeat: -1,
+    remainingMs: 0,
+    totalMs: 0,
+    isHeroTurn: false,
+    isRunning: false,
+  }
+}
 
 function isHandRunning(phase: HandState['phase']): boolean {
   return (

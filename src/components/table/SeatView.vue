@@ -6,7 +6,9 @@ import type { TableSeatViewModel } from '../../game/mock/createMockTableState'
 const props = defineProps<{
   seat: TableSeatViewModel
   actionLabel?: string
+  turnLabel?: string | null
   hideCards?: boolean
+  turnSeconds?: number | null
 }>()
 
 const markerIcon = computed(() => {
@@ -16,6 +18,9 @@ const markerIcon = computed(() => {
 
   return resolveSeatMarker(props.seat.role)
 })
+
+const badgeText = computed(() => props.actionLabel ?? props.turnLabel ?? null)
+const isTurnBadge = computed(() => !props.actionLabel && Boolean(props.turnLabel))
 </script>
 
 <template>
@@ -26,9 +31,13 @@ const markerIcon = computed(() => {
       'is-folded': seat.isFolded,
       'is-hero': seat.isHero,
       'is-allin': seat.isAllIn,
+      'is-turn-actor': turnSeconds !== null,
     }"
   >
-    <div v-if="actionLabel" class="action-badge">{{ actionLabel }}</div>
+    <div v-if="badgeText" class="action-badge" :class="{ 'is-turn': isTurnBadge }">
+      {{ badgeText }}
+    </div>
+    <div v-if="turnSeconds !== null" class="turn-timer">{{ turnSeconds }}s</div>
 
     <div class="avatar-wrap">
       <img :src="seat.avatar" :alt="seat.name" class="avatar" />
@@ -70,8 +79,33 @@ const markerIcon = computed(() => {
   animation: badge-in 0.18s ease-out;
 }
 
+.action-badge.is-turn {
+  border-color: rgba(121, 207, 168, 0.82);
+  color: #8ef3cb;
+}
+
+.turn-timer {
+  position: absolute;
+  top: -1.16rem;
+  right: -0.3rem;
+  min-width: 1.55rem;
+  padding: 0.11rem 0.28rem;
+  border-radius: 999px;
+  background: rgba(7, 10, 15, 0.92);
+  border: 1px solid rgba(121, 207, 168, 0.86);
+  color: #8ef3cb;
+  font-size: 0.62rem;
+  text-align: center;
+  line-height: 1.1;
+  letter-spacing: 0.01em;
+}
+
 .seat-view.is-active .avatar-wrap {
   box-shadow: 0 0 0 2px #efcf6e, 0 0 18px rgba(247, 209, 100, 0.55);
+}
+
+.seat-view.is-turn-actor .avatar-wrap {
+  box-shadow: 0 0 0 2px #79cfa8, 0 0 18px rgba(86, 232, 178, 0.5);
 }
 
 .seat-view.is-folded {
