@@ -24,17 +24,17 @@ const props = withDefaults(
 <template>
   <div class="action-panel">
     <button class="action fold" :disabled="props.locked || !props.canFold" @click="emit('fold')">
-      FOLD
+      弃牌
     </button>
     <button
       class="action call"
       :disabled="props.locked || !(props.canCheck || props.canCall)"
       @click="emit('callCheck')"
     >
-      {{ props.canCheck ? 'CHECK' : `CALL ${props.callAmount}` }}
+      {{ props.canCheck ? '过牌' : `跟注 ${props.callAmount}` }}
     </button>
     <button class="action raise" :disabled="props.locked || !props.canRaise" @click="emit('raise')">
-      RAISE {{ props.minRaiseTo }}
+      加注 {{ props.minRaiseTo }}
     </button>
   </div>
 </template>

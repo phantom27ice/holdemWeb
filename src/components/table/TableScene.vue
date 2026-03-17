@@ -854,9 +854,10 @@ function formatEngineError(error: EngineError): string {
 
 .pot-bar-wrap {
   position: absolute;
-  top: -0.55rem;
+  top: 50%;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translate(-50%, -260%);
+  z-index: 26;
 }
 
 .board-wrap {
@@ -938,6 +939,10 @@ function formatEngineError(error: EngineError): string {
 }
 
 @media (max-width: 768px) {
+  .pot-bar-wrap {
+    transform: translate(-50%, -230%);
+  }
+
   .hero-layer {
     gap: 0.24rem;
   }
@@ -957,6 +962,10 @@ function formatEngineError(error: EngineError): string {
 }
 
 @media (max-width: 1024px) and (min-width: 769px) {
+  .pot-bar-wrap {
+    transform: translate(-50%, -245%);
+  }
+
   .hero-layer {
     gap: 0.3rem;
   }
