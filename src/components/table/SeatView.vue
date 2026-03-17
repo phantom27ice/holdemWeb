@@ -136,14 +136,14 @@ const markerIcon = computed(() => {
   top: 0.8rem;
   left: calc(100% + 0.35rem);
   display: flex;
-  gap: 0.12rem;
+  gap: 0.45rem;
 }
 
 .cards img {
-  width: 20px;
+  width: min(10vw, 62px);
   aspect-ratio: 159 / 224;
-  border-radius: 0.18rem;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+  border-radius: 0.3rem;
+  box-shadow: 0 10px 16px rgba(0, 0, 0, 0.35);
 }
 
 .cards.hidden {
