@@ -52,7 +52,8 @@ const DEAL_LAYOUT_WAIT_MAX_FRAMES = 12;
 const tableStore = useTableStore();
 const { handState, tableView, turnTempo, events, lastEngineError } =
   storeToRefs(tableStore);
-const { heroFold, heroCallOrCheck, heroRaise, consumeEvents } = tableStore;
+const { heroFold, heroCallOrCheck, heroRaise, heroAllIn, consumeEvents } =
+  tableStore;
 
 onMounted(() => {
   actionToast.value = "点击任意位置开始游戏";
@@ -870,10 +871,17 @@ function formatEngineError(error: EngineError): string {
           :call-amount="tableView.legalActions.callAmount"
           :can-raise="tableView.legalActions.canRaise"
           :min-raise-to="tableView.legalActions.minRaiseTo"
+          :max-raise-to="tableView.legalActions.maxRaiseTo"
+          :can-all-in="tableView.legalActions.canAllIn"
+          :all-in-to="tableView.legalActions.allInTo"
+          :pot-amount="tableView.pot"
+          :hero-street-commit="heroSeat?.bet ?? 0"
           :locked="actionLocked"
           @fold="heroFold"
           @call-check="heroCallOrCheck"
           @raise="heroRaise"
+          @all-in="heroAllIn"
+          @hint="showToast"
         />
       </div>
 

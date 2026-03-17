@@ -88,7 +88,7 @@ export const useTableStore = defineStore('table', () => {
     scheduleEngineProgress()
   }
 
-  function heroRaise(): void {
+  function heroRaise(targetAmountTo?: number): void {
     if (handState.value.toActSeat !== HERO_SEAT) {
       return
     }
@@ -98,23 +98,50 @@ export const useTableStore = defineStore('table', () => {
     const betAction = legalActions.find((item) => item.type === 'BET')
 
     if (raiseAction?.minAmountTo) {
+      const amountTo = clampAmountTo(
+        targetAmountTo,
+        raiseAction.minAmountTo,
+        raiseAction.maxAmountTo ?? raiseAction.minAmountTo,
+      )
       applyAction({
         type: 'RAISE',
         seat: HERO_SEAT,
-        amountTo: raiseAction.minAmountTo,
+        amountTo,
       })
       scheduleEngineProgress()
       return
     }
 
     if (betAction?.minAmountTo) {
+      const amountTo = clampAmountTo(
+        targetAmountTo,
+        betAction.minAmountTo,
+        betAction.maxAmountTo ?? betAction.minAmountTo,
+      )
       applyAction({
         type: 'BET',
         seat: HERO_SEAT,
-        amountTo: betAction.minAmountTo,
+        amountTo,
       })
       scheduleEngineProgress()
     }
+  }
+
+  function heroAllIn(): void {
+    if (handState.value.toActSeat !== HERO_SEAT) {
+      return
+    }
+
+    const legalActions = getLegalActions(handState.value, HERO_SEAT)
+    if (!legalActions.some((item) => item.type === 'ALL_IN')) {
+      return
+    }
+
+    applyAction({
+      type: 'ALL_IN',
+      seat: HERO_SEAT,
+    })
+    scheduleEngineProgress()
   }
 
   function scheduleEngineProgress(): void {
@@ -328,6 +355,7 @@ export const useTableStore = defineStore('table', () => {
     heroFold,
     heroCallOrCheck,
     heroRaise,
+    heroAllIn,
     consumeEvents,
   }
 })
@@ -363,6 +391,23 @@ function pickTimeoutAction(seat: number, legalActions: LegalAction[]): Action | 
 function randomAiDelayMs(): number {
   const spread = AI_THINK_DELAY_MAX_MS - AI_THINK_DELAY_MIN_MS
   return AI_THINK_DELAY_MIN_MS + Math.floor(Math.random() * (spread + 1))
+}
+
+function clampAmountTo(targetAmountTo: number | undefined, minAmountTo: number, maxAmountTo: number): number {
+  const normalized =
+    typeof targetAmountTo === 'number' && Number.isFinite(targetAmountTo)
+      ? Math.trunc(targetAmountTo)
+      : minAmountTo
+
+  if (normalized < minAmountTo) {
+    return minAmountTo
+  }
+
+  if (normalized > maxAmountTo) {
+    return maxAmountTo
+  }
+
+  return normalized
 }
 
 function createIdleTurnTempo(): TurnTempoState {

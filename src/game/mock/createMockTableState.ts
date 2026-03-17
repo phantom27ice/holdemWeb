@@ -35,6 +35,9 @@ export interface TableViewModel {
     callAmount: number
     canRaise: boolean
     minRaiseTo: number
+    maxRaiseTo: number
+    canAllIn: boolean
+    allInTo: number
   }
 }
 
@@ -62,6 +65,7 @@ export function toTableViewModel(state: HandState): TableViewModel {
   const callAction = findAction(legal, 'CALL')
   const checkAction = findAction(legal, 'CHECK')
   const raiseAction = findAction(legal, 'RAISE') ?? findAction(legal, 'BET')
+  const allInAction = findAction(legal, 'ALL_IN')
 
   return {
     phase: state.phase,
@@ -98,6 +102,9 @@ export function toTableViewModel(state: HandState): TableViewModel {
       callAmount: callAction?.toCall ?? 0,
       canRaise: Boolean(raiseAction),
       minRaiseTo: raiseAction?.minAmountTo ?? 0,
+      maxRaiseTo: raiseAction?.maxAmountTo ?? 0,
+      canAllIn: Boolean(allInAction),
+      allInTo: allInAction?.maxAmountTo ?? 0,
     },
   }
 }
