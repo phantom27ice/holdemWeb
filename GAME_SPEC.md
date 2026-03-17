@@ -33,7 +33,7 @@
    2. 集成流程测试通过
    3. `npm run build` 通过
 
-## 2. 当前进度盘点（截至 2026-03-18 Phase B 完成）
+## 2. 当前进度盘点（截至 2026-03-18 Phase D 完成）
 
 ## 2.1 已完成
 
@@ -45,24 +45,26 @@
    2. Preflop 结束后自动进 Flop
 5. Hero 操作已接真实 `dispatch`。
 6. 简单 AI 已接入（检查/跟注优先）。
-7. M1 关键测试已建立并通过（7 条）。
+7. M1 关键测试已建立并通过（13 条）。
 8. `dispatch` 前后已接入统一不变量检查。
 9. 非法动作已改为显式错误返回（含错误码）。
 10. 已实现 `evaluate7` + `compareRank`，覆盖 10 类牌型识别。
 11. 已打通无边池 showdown 结算（含平局分池与 odd chip）。
+12. 已实现边池分层构建与逆序结算。
+13. 已实现 short all-in reopen 累计规则。
+14. 已实现未跟注金额返还（uncalled bet return）。
+15. 已接入牌局结束后自动开新手（store 层）。
+16. 已通过连续 50 手稳定性测试（无状态崩坏）。
 
 ## 2.2 部分完成（需收敛）
 
 1. 事件流已有，但尚未驱动完整动画链路。
-2. 当前结算链路已覆盖单主池 showdown，未覆盖边池分层结算。
+2. 当前规则引擎核心功能已完整，仍需补充更多极端场景回归集。
 
 ## 2.3 未完成
 
-1. 边池构建、分池结算与边池级别 odd chip 分配。
-2. 短码全下累计 reopen 的完备实现与回归测试。
-3. 未跟注金额返还（uncalled bet return）完备实现。
-4. 连续多手牌运行（完整牌局循环）与玩家淘汰/断局处理。
-5. 完整 UI 动画和信息反馈（行为 toast、筹码飞行、派奖动画）。
+1. 完整 UI 动画和信息反馈（行为 toast、筹码飞行、派奖动画）。
+2. UI 层错误回显与回合状态提示（消费 `lastEngineError`、eventQueue）。
 
 ## 3. 重新规划后的实施阶段
 
@@ -167,18 +169,30 @@
 1. 进入 Phase B：实现 `evaluate7/compareRank`。
 2. 打通无边池 showdown 结算。
 
-## Sprint 3（当前）
+## Sprint 3（已完成）
 
 1. 进入 Phase C：实现边池分层构建与逆序结算。
 2. 完成 short all-in reopen 累计规则与回归测试。
 3. 实现未跟注金额返还（uncalled bet return）。
 
+## Sprint 4（已完成）
+
+1. 进入 Phase D：一手结束后自动开新手。
+2. 完成庄位/盲注轮转与筹码延续验证。
+3. 加入“连续 50 手稳定性”自动化测试。
+
+## Sprint 5（当前）
+
+1. 进入 Phase E：补齐行为回显（Fold/Call/Raise/All-in）。
+2. 接入 `lastEngineError` UI 提示。
+3. 开始发牌/翻牌/下注/派奖动画事件联动。
+
 ## 5. 里程碑看板
 
 1. [x] Phase A 完成
 2. [x] Phase B 完成
-3. [ ] Phase C 完成
-4. [ ] Phase D 完成
+3. [x] Phase C 完成
+4. [x] Phase D 完成
 5. [ ] Phase E 完成
 6. [ ] Phase F 完成
 

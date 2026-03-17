@@ -49,6 +49,7 @@ export interface PlayerState {
   streetCommit: number
   handCommit: number
   actedThisStreet: boolean
+  lastActionToAmountThisStreet: number | null
 }
 
 export interface Pot {

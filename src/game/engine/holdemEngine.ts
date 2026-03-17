@@ -137,8 +137,20 @@ export function dispatch(state: HandState, action: Action): EngineResult {
     }
 
     case 'PAYOUT': {
-      working.phase = 'PAYOUT'
-      working.toActSeat = -1
+      if (working.phase === 'SHOWDOWN') {
+        resolveSinglePotShowdown(working, events)
+      } else {
+        const remaining = getContestingPlayers(working)
+        if (remaining.length === 1) {
+          resolveSingleWinnerPayout(working, remaining[0].seat, events)
+        } else {
+          error = createEngineError(
+            'INVALID_PHASE',
+            action,
+            `PAYOUT is not allowed in phase ${working.phase} with ${remaining.length} contenders`,
+          )
+        }
+      }
       break
     }
 
@@ -200,7 +212,7 @@ export function getLegalActions(state: HandState, seat: number): LegalAction[] {
     }
   } else {
     const minRaiseTo = state.currentBet + state.lastFullRaiseSize
-    if (maxAmountTo >= minRaiseTo) {
+    if (maxAmountTo >= minRaiseTo && canPlayerReopenRaise(state, player)) {
       actions.push({
         type: 'RAISE',
         minAmountTo: minRaiseTo,
@@ -237,6 +249,7 @@ function startHand(state: HandState, seed?: number): void {
     player.streetCommit = 0
     player.handCommit = 0
     player.actedThisStreet = false
+    player.lastActionToAmountThisStreet = null
   }
 
   const activeSeats = getInHandSeats(state)
@@ -314,6 +327,7 @@ function beginPreFlopBetting(state: HandState): void {
 
   for (const player of state.players) {
     player.actedThisStreet = player.hasFolded || !player.inHand || player.isAllIn
+    player.lastActionToAmountThisStreet = null
   }
 
   if (getInHandSeats(state).length === 2) {
@@ -380,11 +394,13 @@ function applyPlayerAction(
   if (action.type === 'FOLD') {
     player.hasFolded = true
     player.actedThisStreet = true
+    player.lastActionToAmountThisStreet = player.streetCommit
     events.push({ type: 'ACTION_APPLIED', seat, action: action.type, amount: 0 })
   }
 
   if (action.type === 'CHECK') {
     player.actedThisStreet = true
+    player.lastActionToAmountThisStreet = player.streetCommit
     events.push({ type: 'ACTION_APPLIED', seat, action: action.type, amount: 0 })
   }
 
@@ -392,6 +408,7 @@ function applyPlayerAction(
     const toAmount = state.currentBet
     const paid = commitToAmount(player, toAmount)
     player.actedThisStreet = true
+    player.lastActionToAmountThisStreet = player.streetCommit
     events.push({ type: 'ACTION_APPLIED', seat, action: action.type, amount: paid })
   }
 
@@ -433,6 +450,7 @@ function applyPlayerAction(
 
     resetActedFlagsForAggression(state, seat)
     player.actedThisStreet = true
+    player.lastActionToAmountThisStreet = player.streetCommit
 
     events.push({
       type: 'ACTION_APPLIED',
@@ -457,6 +475,7 @@ function applyPlayerAction(
     }
 
     player.actedThisStreet = true
+    player.lastActionToAmountThisStreet = player.streetCommit
 
     events.push({
       type: 'ACTION_APPLIED',
@@ -538,6 +557,7 @@ function beginPostFlopStreet(
   for (const player of state.players) {
     player.streetCommit = 0
     player.actedThisStreet = player.hasFolded || !player.inHand || player.isAllIn
+    player.lastActionToAmountThisStreet = null
   }
 
   state.toActSeat = getFirstPostFlopActor(state)
@@ -632,7 +652,7 @@ function resolveSingleWinnerPayout(
   winnerSeat: number,
   events: GameEvent[],
 ): void {
-  awardMainPot(state, [winnerSeat], events, [winnerSeat])
+  resolvePayout(state, events, undefined, [winnerSeat])
 }
 
 function resolveSinglePotShowdown(state: HandState, events: GameEvent[]): void {
@@ -644,90 +664,224 @@ function resolveSinglePotShowdown(state: HandState, events: GameEvent[]): void {
     return
   }
 
-  const ranked = contenders.map((player) => {
+  const rankBySeat = new Map<number, ReturnType<typeof evaluate7>['rank']>()
+
+  for (const player of contenders) {
     const evaluated = evaluate7([...player.holeCards, ...state.board])
+    rankBySeat.set(player.seat, evaluated.rank)
     events.push({
       type: 'SHOWDOWN_REVEAL',
       seat: player.seat,
       cards: player.holeCards,
     })
-    return {
-      seat: player.seat,
-      rank: evaluated.rank,
-    }
-  })
-
-  let winners = [ranked[0]]
-  for (let index = 1; index < ranked.length; index += 1) {
-    const candidate = ranked[index]
-    const compared = compareRank(candidate.rank, winners[0].rank)
-
-    if (compared > 0) {
-      winners = [candidate]
-    } else if (compared === 0) {
-      winners.push(candidate)
-    }
   }
 
-  const winnerSeats = winners.map((winner) => winner.seat)
-  const eligibleSeats = contenders.map((player) => player.seat)
-  awardMainPot(state, winnerSeats, events, eligibleSeats)
+  resolvePayout(state, events, rankBySeat)
 }
 
-function awardMainPot(
+function resolvePayout(
   state: HandState,
-  winnerSeats: number[],
   events: GameEvent[],
-  eligibleSeats: number[],
+  rankBySeat?: Map<number, ReturnType<typeof evaluate7>['rank']>,
+  forcedWinners?: number[],
 ): void {
-  const potAmount = state.players.reduce((sum, player) => sum + player.handCommit, 0)
-  const normalizedWinners = [...new Set(winnerSeats)]
+  const uncalled = applyUncalledReturn(state)
+  state.uncalledReturn = uncalled.amount
+  const pots = buildPots(state)
+  state.pots = pots
 
-  if (normalizedWinners.length === 0) {
-    state.winnerSeatIds = []
-    state.phase = 'PAYOUT'
-    state.toActSeat = -1
-    return
-  }
+  const winnerSet = new Set<number>()
 
-  const share = potAmount > 0 ? Math.floor(potAmount / normalizedWinners.length) : 0
-  const oddChip = potAmount > 0 ? potAmount - share * normalizedWinners.length : 0
-
-  for (const seat of normalizedWinners) {
-    const player = findPlayer(state, seat)
-    if (!player) {
+  for (let index = pots.length - 1; index >= 0; index -= 1) {
+    const pot = pots[index]
+    if (pot.amount <= 0 || pot.eligibleSeats.length === 0) {
       continue
     }
 
-    player.stack += share
+    let winners: number[] = []
+    if (forcedWinners && forcedWinners.length > 0) {
+      winners = forcedWinners.filter((seat) => pot.eligibleSeats.includes(seat))
+    } else if (pot.eligibleSeats.length === 1) {
+      winners = [pot.eligibleSeats[0]]
+    } else if (rankBySeat) {
+      winners = pickBestRankedSeats(pot.eligibleSeats, rankBySeat)
+    }
+
+    if (winners.length === 0) {
+      continue
+    }
+
+    const share = Math.floor(pot.amount / winners.length)
+    const oddChip = pot.amount - share * winners.length
+
+    for (const seat of winners) {
+      const player = findPlayer(state, seat)
+      if (player) {
+        player.stack += share
+        if (player.stack > 0) {
+          player.isAllIn = false
+        }
+      }
+      winnerSet.add(seat)
+    }
+
+    if (oddChip > 0) {
+      const oddSeat = pickOddChipWinner(state, winners)
+      const oddWinner = findPlayer(state, oddSeat)
+      if (oddWinner) {
+        oddWinner.stack += oddChip
+        if (oddWinner.stack > 0) {
+          oddWinner.isAllIn = false
+        }
+      }
+      winnerSet.add(oddSeat)
+    }
+
+    events.push({
+      type: 'POT_AWARDED',
+      potId: pot.id,
+      winners,
+      amount: pot.amount,
+    })
   }
 
-  if (oddChip > 0) {
-    const oddSeat = pickOddChipWinner(state, normalizedWinners)
-    const oddWinner = findPlayer(state, oddSeat)
-    if (oddWinner) {
-      oddWinner.stack += oddChip
+  if (uncalled.amount > 0 && uncalled.ownerSeat !== null) {
+    winnerSet.add(uncalled.ownerSeat)
+  }
+
+  state.winnerSeatIds = [...winnerSet]
+  state.phase = 'PAYOUT'
+  state.toActSeat = -1
+}
+
+function applyUncalledReturn(state: HandState): { amount: number; ownerSeat: number | null } {
+  const ownerSeat = findUncalledOwner(state)
+  if (ownerSeat === null) {
+    return { amount: 0, ownerSeat: null }
+  }
+
+  const sortedContribs = state.players
+    .map((player) => player.handCommit)
+    .filter((amount) => amount > 0)
+    .sort((a, b) => b - a)
+
+  const highest = sortedContribs[0] ?? 0
+  const secondHighest = sortedContribs[1] ?? 0
+  const uncalled = Math.max(0, highest - secondHighest)
+
+  if (uncalled <= 0) {
+    return { amount: 0, ownerSeat: null }
+  }
+
+  const owner = findPlayer(state, ownerSeat)
+  if (!owner) {
+    return { amount: 0, ownerSeat: null }
+  }
+
+  owner.handCommit -= uncalled
+  owner.stack += uncalled
+  if (owner.stack > 0) {
+    owner.isAllIn = false
+  }
+  return { amount: uncalled, ownerSeat }
+}
+
+function findUncalledOwner(state: HandState): number | null {
+  const sorted = [...state.players].sort((a, b) => b.handCommit - a.handCommit)
+  const top = sorted[0]
+  const second = sorted[1]
+
+  if (!top || !second) {
+    return null
+  }
+
+  if (top.handCommit <= second.handCommit) {
+    return null
+  }
+
+  return top.seat
+}
+
+function buildPots(state: HandState): HandState['pots'] {
+  const playersWithContrib = state.players.filter((player) => player.handCommit > 0)
+  if (playersWithContrib.length === 0) {
+    return []
+  }
+
+  const levels = [...new Set(playersWithContrib.map((player) => player.handCommit))].sort(
+    (a, b) => a - b,
+  )
+
+  const pots: HandState['pots'] = []
+  let previous = 0
+
+  for (let index = 0; index < levels.length; index += 1) {
+    const level = levels[index]
+    const covered = state.players.filter((player) => player.handCommit >= level)
+    const amount = (level - previous) * covered.length
+    previous = level
+
+    if (amount <= 0) {
+      continue
+    }
+
+    const eligibleSeats = covered
+      .filter((player) => player.inHand && !player.hasFolded)
+      .map((player) => player.seat)
+
+    pots.push({
+      id: index === 0 ? 'main' : `side-${index}`,
+      amount,
+      eligibleSeats,
+      level: index + 1,
+    })
+  }
+
+  return pots
+}
+
+function pickBestRankedSeats(
+  seats: number[],
+  rankBySeat: Map<number, ReturnType<typeof evaluate7>['rank']>,
+): number[] {
+  const rankedSeats = seats.filter((seat) => rankBySeat.has(seat))
+  if (rankedSeats.length === 0) {
+    return []
+  }
+
+  let winners = [rankedSeats[0]]
+  let bestRank = rankBySeat.get(rankedSeats[0])
+
+  for (let index = 1; index < rankedSeats.length; index += 1) {
+    const seat = rankedSeats[index]
+    const rank = rankBySeat.get(seat)
+    if (!rank || !bestRank) {
+      continue
+    }
+
+    const compared = compareRank(rank, bestRank)
+    if (compared > 0) {
+      winners = [seat]
+      bestRank = rank
+    } else if (compared === 0) {
+      winners.push(seat)
     }
   }
 
-  state.winnerSeatIds = normalizedWinners
-  state.pots = [
-    {
-      id: 'main',
-      amount: potAmount,
-      eligibleSeats: [...new Set(eligibleSeats)],
-      level: 1,
-    },
-  ]
-  state.phase = 'PAYOUT'
-  state.toActSeat = -1
+  return winners
+}
 
-  events.push({
-    type: 'POT_AWARDED',
-    potId: 'main',
-    winners: normalizedWinners,
-    amount: potAmount,
-  })
+function canPlayerReopenRaise(state: HandState, player: PlayerState): boolean {
+  if (state.currentBet === 0) {
+    return true
+  }
+
+  if (player.lastActionToAmountThisStreet === null) {
+    return true
+  }
+
+  const additionalPressure = state.currentBet - player.lastActionToAmountThisStreet
+  return additionalPressure >= state.lastFullRaiseSize
 }
 
 function pickOddChipWinner(state: HandState, winners: number[]): number {
@@ -941,6 +1095,18 @@ function validateInvariants(state: HandState): string[] {
       violations.push(`seat ${player.seat} handCommit must be >= 0`)
     }
 
+    if (player.lastActionToAmountThisStreet !== null) {
+      if (player.lastActionToAmountThisStreet < 0) {
+        violations.push(`seat ${player.seat} lastActionToAmountThisStreet must be >= 0`)
+      }
+
+      if (player.lastActionToAmountThisStreet > state.currentBet) {
+        violations.push(
+          `seat ${player.seat} lastActionToAmountThisStreet must be <= currentBet`,
+        )
+      }
+    }
+
     if (player.isAllIn && player.stack !== 0) {
       violations.push(`seat ${player.seat} isAllIn requires stack === 0`)
     }
@@ -958,9 +1124,9 @@ function validateInvariants(state: HandState): string[] {
     maxStreetCommit = Math.max(maxStreetCommit, player.streetCommit)
   }
 
-  if (state.currentBet !== maxStreetCommit) {
+  if (state.currentBet < maxStreetCommit) {
     violations.push(
-      `currentBet (${state.currentBet}) must equal max streetCommit (${maxStreetCommit})`,
+      `currentBet (${state.currentBet}) must be >= max streetCommit (${maxStreetCommit})`,
     )
   }
 
@@ -1009,6 +1175,7 @@ function toPlayerState(input: TablePlayerInput): PlayerState {
     streetCommit: 0,
     handCommit: 0,
     actedThisStreet: false,
+    lastActionToAmountThisStreet: null,
   }
 }
 

@@ -13,7 +13,7 @@ import {
   toTableViewModel,
 } from '../game/mock/createMockTableState'
 
-const AI_LOOP_GUARD = 32
+const AI_LOOP_GUARD = 256
 
 export const useTableStore = defineStore('table', () => {
   const handState = ref<HandState>(
@@ -98,6 +98,14 @@ export const useTableStore = defineStore('table', () => {
     while (loop < AI_LOOP_GUARD) {
       loop += 1
 
+      if (handState.value.phase === 'PAYOUT') {
+        const started = startNextHandIfPossible()
+        if (!started) {
+          break
+        }
+        continue
+      }
+
       if (!isHandRunning(handState.value.phase)) {
         break
       }
@@ -124,6 +132,18 @@ export const useTableStore = defineStore('table', () => {
 
       applyAction({ type: 'FOLD', seat })
     }
+  }
+
+  function startNextHandIfPossible(): boolean {
+    const activePlayers = handState.value.players.filter((player) => player.stack > 0)
+    if (activePlayers.length < 2) {
+      return false
+    }
+
+    applyAction({ type: 'START_HAND' })
+    applyAction({ type: 'POST_FORCED_BETS' })
+    applyAction({ type: 'DEAL_HOLE_CARDS' })
+    return true
   }
 
   function applyAction(action: Action): void {
