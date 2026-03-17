@@ -343,7 +343,11 @@ function formatEngineError(error: EngineError): string {
 }
 
 .actions-wrap {
-  margin-top: 0.12rem;
+  margin-top: 0.35rem;
+}
+
+.hero-layer :deep(.hole-cards) {
+  transform: translateY(-0.2rem);
 }
 
 .chip-layer-wrap {
@@ -391,13 +395,41 @@ function formatEngineError(error: EngineError): string {
 }
 
 @media (max-width: 768px) {
+  .hero-layer {
+    gap: 0.24rem;
+  }
+
+  .hero-layer :deep(.hole-cards) {
+    transform: translateY(-0.95rem);
+  }
+
   .actions-wrap {
-    margin-top: 0.2rem;
+    margin-top: 1.45rem;
   }
 
   .action-toast {
     top: 0.4rem;
     font-size: 0.68rem;
+  }
+}
+
+@media (max-width: 1024px) and (min-width: 769px) {
+  .hero-layer {
+    gap: 0.3rem;
+  }
+
+  .hero-layer :deep(.hole-cards) {
+    transform: translateY(-0.55rem);
+  }
+
+  .actions-wrap {
+    margin-top: 1rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .actions-wrap {
+    margin-top: 1.85rem;
   }
 }
 </style>
