@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cocos Master"
+  short_description: "Cocos Creator 3.x workflow and debugging guide"
+  default_prompt: "Use $cocos-master to implement or debug a Cocos Creator 3.x TypeScript feature in this project."
