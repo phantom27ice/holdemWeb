@@ -1,0 +1,590 @@
+openapi: 3.1.0
+info:
+  title: Cocos 联机德州扑克 HTTP API
+  version: 0.1.0
+  description: >
+    基于当前德州扑克项目抽取的第一版联机 HTTP 接口规范。
+    范围只覆盖大厅、选座入桌和全量快照，不包含复杂平台能力。
+servers:
+  - url: https://api.example.com
+    description: 生产环境示例
+  - url: http://localhost:3000
+    description: 本地开发示例
+tags:
+  - name: Auth
+    description: 登录与身份
+  - name: Lobby
+    description: 大厅与桌子列表
+  - name: Table
+    description: 选座入桌与牌桌快照
+security:
+  - bearerAuth: []
+paths:
+  /api/login/guest:
+    post:
+      tags:
+        - Auth
+      summary: 游客登录
+      description: 获取 token 和用户基础信息。
+      security: []
+      operationId: guestLogin
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GuestLoginRequest'
+      responses:
+        '200':
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuestLoginApiResponse'
+        default:
+          description: 登录失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+  /api/tables:
+    get:
+      tags:
+        - Lobby
+      summary: 获取大厅桌子列表
+      description: >
+        返回大厅中可见的桌子摘要，以及每张桌子的座位占用预览。
+      operationId: getTables
+      responses:
+        '200':
+          description: 获取成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetTablesApiResponse'
+        default:
+          description: 获取失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+  /api/tables/{tableId}/join:
+    post:
+      tags:
+        - Table
+      summary: 大厅选座进入牌桌
+      description: >
+        玩家在大厅点击某个空位后调用。服务端需要原子占位，并返回固定 seatNo。
+      operationId: joinTable
+      parameters:
+        - name: tableId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JoinTableRequest'
+      responses:
+        '200':
+          description: 入桌成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JoinTableApiResponse'
+        default:
+          description: 入桌失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+  /api/tables/{tableId}/snapshot:
+    get:
+      tags:
+        - Table
+      summary: 获取全量牌桌快照
+      description: 用于首次进入、重连恢复、状态纠偏。
+      operationId: getTableSnapshot
+      parameters:
+        - name: tableId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 获取成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetTableSnapshotApiResponse'
+        default:
+          description: 获取失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    UserStatus:
+      type: string
+      enum:
+        - ONLINE
+        - OFFLINE
+        - IN_GAME
+    TableStatus:
+      type: string
+      enum:
+        - WAITING
+        - PLAYING
+        - CLOSED
+    Suit:
+      type: string
+      enum:
+        - Spade
+        - Heart
+        - Diamond
+        - Club
+    Street:
+      type: string
+      enum:
+        - PRE_FLOP
+        - FLOP
+        - TURN
+        - RIVER
+        - SHOWDOWN
+    Phase:
+      type: string
+      enum:
+        - WAITING_FOR_PLAYERS
+        - POST_FORCED_BETS
+        - DEAL_HOLE_CARDS
+        - BETTING_PRE_FLOP
+        - DEAL_FLOP
+        - BETTING_FLOP
+        - DEAL_TURN
+        - BETTING_TURN
+        - DEAL_RIVER
+        - BETTING_RIVER
+        - SHOWDOWN
+        - PAYOUT
+        - HAND_FINISHED
+    Role:
+      type:
+        - string
+        - 'null'
+      enum:
+        - BTN
+        - SB
+        - BB
+        - null
+    SeatStatus:
+      type: string
+      enum:
+        - IDLE
+        - WAITING
+        - ACTING
+        - OFFLINE
+    ActionType:
+      type: string
+      enum:
+        - FOLD
+        - CHECK
+        - CALL
+        - BET
+        - RAISE
+        - ALL_IN
+    ApiErrorCode:
+      type: string
+      enum:
+        - UNAUTHORIZED
+        - TABLE_NOT_FOUND
+        - TABLE_CLOSED
+        - SEAT_OCCUPIED
+        - INVALID_BUY_IN
+        - NOT_YOUR_TURN
+        - INVALID_AMOUNT
+        - ACTION_NOT_ALLOWED
+        - VERSION_EXPIRED
+        - HAND_ALREADY_FINISHED
+    ApiError:
+      type: object
+      required:
+        - code
+      properties:
+        code:
+          $ref: '#/components/schemas/ApiErrorCode'
+        details:
+          type: object
+          additionalProperties: true
+    ApiErrorResponse:
+      type: object
+      required:
+        - code
+        - message
+        - data
+        - error
+      properties:
+        code:
+          type: integer
+          example: 4001
+        message:
+          type: string
+          example: 座位已被占用
+        data:
+          type: 'null'
+        error:
+          $ref: '#/components/schemas/ApiError'
+    Card:
+      type: object
+      required:
+        - suit
+        - rank
+      properties:
+        suit:
+          $ref: '#/components/schemas/Suit'
+        rank:
+          type: integer
+          minimum: 2
+          maximum: 14
+        code:
+          type: string
+          example: SA
+    UserProfile:
+      type: object
+      required:
+        - userId
+        - nickname
+        - avatarUrl
+      properties:
+        userId:
+          type: string
+        nickname:
+          type: string
+        avatarUrl:
+          type: string
+          format: uri
+        balance:
+          type: integer
+        status:
+          $ref: '#/components/schemas/UserStatus'
+    LobbySeatPreview:
+      type: object
+      required:
+        - seatNo
+        - isOccupied
+      properties:
+        seatNo:
+          type: integer
+          minimum: 0
+        isOccupied:
+          type: boolean
+        userId:
+          type: string
+        nickname:
+          type: string
+        avatarUrl:
+          type: string
+          format: uri
+    LobbyTableSummary:
+      type: object
+      required:
+        - tableId
+        - name
+        - maxPlayers
+        - playerCount
+        - smallBlind
+        - bigBlind
+        - status
+        - seats
+      properties:
+        tableId:
+          type: string
+        name:
+          type: string
+        maxPlayers:
+          type: integer
+          minimum: 2
+          maximum: 10
+        playerCount:
+          type: integer
+          minimum: 0
+        smallBlind:
+          type: integer
+        bigBlind:
+          type: integer
+        status:
+          $ref: '#/components/schemas/TableStatus'
+        seats:
+          type: array
+          items:
+            $ref: '#/components/schemas/LobbySeatPreview'
+    PotInfo:
+      type: object
+      required:
+        - potId
+        - amount
+      properties:
+        potId:
+          type: string
+        amount:
+          type: integer
+    LegalAction:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          $ref: '#/components/schemas/ActionType'
+        toCall:
+          type: integer
+        minAmountTo:
+          type: integer
+        maxAmountTo:
+          type: integer
+    SelfState:
+      type: object
+      required:
+        - seatNo
+        - holeCards
+        - legalActions
+      properties:
+        seatNo:
+          type: integer
+          minimum: 0
+        holeCards:
+          type: array
+          items:
+            $ref: '#/components/schemas/Card'
+        legalActions:
+          type: array
+          items:
+            $ref: '#/components/schemas/LegalAction'
+    SeatState:
+      type: object
+      required:
+        - seatNo
+        - stack
+        - currentBet
+        - totalBet
+        - isSeated
+        - isInHand
+        - hasFolded
+        - isAllIn
+        - role
+        - status
+      properties:
+        seatNo:
+          type: integer
+          minimum: 0
+        userId:
+          type: string
+        nickname:
+          type: string
+        avatarUrl:
+          type: string
+          format: uri
+        stack:
+          type: integer
+        currentBet:
+          type: integer
+        totalBet:
+          type: integer
+        isSeated:
+          type: boolean
+        isInHand:
+          type: boolean
+        hasFolded:
+          type: boolean
+        isAllIn:
+          type: boolean
+        isReady:
+          type: boolean
+        role:
+          $ref: '#/components/schemas/Role'
+        status:
+          $ref: '#/components/schemas/SeatStatus'
+        exposedCards:
+          type: array
+          items:
+            $ref: '#/components/schemas/Card'
+    TableSnapshot:
+      type: object
+      required:
+        - tableId
+        - handId
+        - phase
+        - street
+        - dealerSeat
+        - sbSeat
+        - bbSeat
+        - toActSeat
+        - potTotal
+        - board
+        - pots
+        - seats
+        - version
+      properties:
+        tableId:
+          type: string
+        handId:
+          type: integer
+        phase:
+          $ref: '#/components/schemas/Phase'
+        street:
+          $ref: '#/components/schemas/Street'
+        dealerSeat:
+          type: integer
+        sbSeat:
+          type: integer
+        bbSeat:
+          type: integer
+        toActSeat:
+          type: integer
+        potTotal:
+          type: integer
+        board:
+          type: array
+          items:
+            $ref: '#/components/schemas/Card'
+        pots:
+          type: array
+          items:
+            $ref: '#/components/schemas/PotInfo'
+        seats:
+          type: array
+          items:
+            $ref: '#/components/schemas/SeatState'
+        actionDeadlineAt:
+          type: integer
+        version:
+          type: integer
+        self:
+          $ref: '#/components/schemas/SelfState'
+    GuestLoginRequest:
+      type: object
+      properties:
+        nickname:
+          type: string
+        deviceId:
+          type: string
+    GuestLoginResponse:
+      type: object
+      required:
+        - token
+        - profile
+      properties:
+        token:
+          type: string
+        profile:
+          $ref: '#/components/schemas/UserProfile'
+    GetTablesResponse:
+      type: object
+      required:
+        - tables
+      properties:
+        tables:
+          type: array
+          items:
+            $ref: '#/components/schemas/LobbyTableSummary'
+    JoinTableRequest:
+      type: object
+      required:
+        - tableId
+        - seatNo
+      properties:
+        tableId:
+          type: string
+        seatNo:
+          type: integer
+          minimum: 0
+        buyIn:
+          type: integer
+    JoinTableResponse:
+      type: object
+      required:
+        - tableId
+        - seatNo
+        - wsUrl
+      properties:
+        tableId:
+          type: string
+        seatNo:
+          type: integer
+          minimum: 0
+        wsUrl:
+          type: string
+          format: uri
+        snapshot:
+          $ref: '#/components/schemas/TableSnapshot'
+    GetTableSnapshotResponse:
+      type: object
+      required:
+        - snapshot
+      properties:
+        snapshot:
+          $ref: '#/components/schemas/TableSnapshot'
+    GuestLoginApiResponse:
+      type: object
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          type: integer
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/GuestLoginResponse'
+    GetTablesApiResponse:
+      type: object
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          type: integer
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/GetTablesResponse'
+    JoinTableApiResponse:
+      type: object
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          type: integer
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/JoinTableResponse'
+    GetTableSnapshotApiResponse:
+      type: object
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          type: integer
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/GetTableSnapshotResponse'
